@@ -8,6 +8,12 @@
 #include <string.h>
 #include <sys/ioctl.h>
 
+int clamp(int v, int min, int max) {
+    if(v < min) return min;
+    if(v >= max) return max;
+    return v;
+}
+
 void pchar(char c) {
     write(STDOUT_FILENO, &c, 1);
 }
@@ -25,13 +31,25 @@ void setCursor(int row, int col) {
     writeTerm(buf);
 }
 
-void renderText(char *text, size_t size, int topOffset, int leftOffset) {
+int getScreenWidth() {
+    struct winsize w;
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+    return w.ws_col;
+}
+
+int getScreenHeight() {
+    struct winsize w;
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+    return w.ws_row;
+}
+
+void renderText(char *text, size_t size, int topOffset, int leftOffset, int cx, int cy) {
     struct winsize w;
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
     int rows = w.ws_row;
     int cols = w.ws_col;
-    // writeTerm("\e[H");
 
+    writeTerm("\e[?25l");
     size_t current = 0;
 
     for(int i = 0; i < topOffset; i++) {
@@ -61,9 +79,17 @@ void renderText(char *text, size_t size, int topOffset, int leftOffset) {
             text++;
             current++;
         }
+
+        while(current < size && *text != '\n') {
+            text++;
+            current++;
+        }
         text++;
         current++;
     }
+
+    writeTerm("\e[?25h");
+    setCursor(cy, cx);
 }
 
 int main(int argc, char **argv) {
@@ -108,12 +134,46 @@ int main(int argc, char **argv) {
 
     writeTerm("\e[?1049h");
 
-    renderText(buffer, size, 0, 0);
+
+    int rf = 0, cf = 0;
+    int rcx = 0, rcy = 0;
+
+    renderText(buffer, size, rf, cf, rcx, rcy);
 
     char input;
     while(true) { 
         read(STDIN_FILENO, &input, 1);
+        int w = getScreenWidth();
+        int h = getScreenHeight();
+
         if(input == 'q') break;
+        if(input == 'h') {
+            if(--rcx < 0) {
+                rcx = 0;
+                cf = clamp(cf - 1, 0, 100000);
+            }
+        }
+        if(input == 'j') {
+            if(++rcy >= h) {
+                rcy = h - 1;
+                rf = clamp(rf + 1, 0, 100000);
+            }
+        }
+        if(input == 'k') {
+            if(--rcy < 0) {
+                rcy = 0;
+                rf = clamp(rf - 1, 0, 100000);
+            }
+        }
+        if(input == 'l') {
+            if(++rcx >= w) {
+                rcx = w - 1;
+                cf = clamp(cf + 1, 0, 100000);
+            }
+        }
+
+        setCursor(rcy, rcx);
+        renderText(buffer, size, rf, cf, rcx, rcy);
     }
 
     writeTerm("\e[?1049l");
